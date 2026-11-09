@@ -1,0 +1,6 @@
+zeep>=4.3,<5
+openapi-spec-validator>=0.7,<1
+jsonschema[format]>=4.23,<5
+alembic>=1.14,<2
+SQLAlchemy>=2,<3
+psycopg[binary]>=3.2,<4
