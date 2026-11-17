@@ -204,6 +204,43 @@ def validate_layout():
     print("PASS: seven repository foundations, nine independent container definitions, the local database and the laptop-only sign-in service")
 
 
+def validate_hosted_settings():
+    """Each hosted service is given only the secrets it needs, and the generated addresses are well formed."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("hosted", ROOT/"mahasetu-deployment/scripts/hosted.py")
+    hosted = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hosted)
+    values = {k: "s-" + k.lower() * 2 for k in hosted.SECRETS}
+    values.update(PORTAL_URL="https://portal.example.test", SITE_URL="https://site.example.test",
+                  CORE_URL="https://core.example.test", REVENUE_API_URL="https://rev.example.test",
+                  EXAMINATION_API_URL="https://exam.example.test", UNIVERSITY_API_URL="https://uni.example.test",
+                  SCHOLARSHIP_DB_HOST="h1", SCHOLARSHIP_DB_PORT="5432", SCHOLARSHIP_DB_TENANT="ref1",
+                  MAHASETU_DB_HOST="h2", MAHASETU_DB_PORT="5432", MAHASETU_DB_TENANT="ref2",
+                  SUPABASE_URL="https://ref1.supabase.co", SUPABASE_PUBLISHABLE_KEY="pk", SUPABASE_STORAGE_KEY="sk")
+    blocks = {name: hosted.service_settings(name, values) for name in hosted.REQUIRED}
+    for name, needed in hosted.REQUIRED.items():
+        assert all(blocks[name].get(key) for key in needed), name
+    secret = {key: values[key] for key in hosted.SECRETS if not key.endswith("_LOGIN_PASSWORD")}
+    owners = {"REVENUE_USER": {"revenue-api", "mahasetu-core"}, "REVENUE_PASSWORD": {"revenue-api", "mahasetu-core"},
+              "EXAMINATION_API_KEY": {"examination-api", "mahasetu-core"},
+              "UNIVERSITY_CLIENT_ID": {"university-api", "mahasetu-core"},
+              "UNIVERSITY_CLIENT_SECRET": {"university-api", "mahasetu-core"}, "UNIVERSITY_SIGNING_KEY": {"university-api"},
+              "OTP_HASH_KEY": {"mahasetu-core"}, "DASHBOARD_CLIENT_TOKEN": {"mahasetu-core", "mahasetu-dashboard"},
+              "REQUESTER_TOKEN_SCHOLARSHIP": {"mahasetu-core", "scholarship-portal"}}
+    for key, value in secret.items():
+        holders = {name for name, block in blocks.items() if value in block.values()}
+        assert holders == owners[key], (key, holders)
+    # Database logins are never shared between services or projects.
+    urls = {name: block["DATABASE_URL"] for name, block in blocks.items() if "DATABASE_URL" in block}
+    assert len(set(urls.values())) == len(urls) == 5
+    assert urls["scholarship-portal"].startswith("postgresql://scholarship_app.ref1:") and "sslmode=no-verify" in urls["scholarship-portal"]
+    assert urls["mahasetu-core"].startswith("postgresql+psycopg://mahasetu_app.ref2:") and "sslmode=require" in urls["mahasetu-core"]
+    assert blocks["mahasetu-core"]["RETURN_URL_DEMO_PMS"] == "https://portal.example.test/verification/return"
+    assert blocks["mahasetu-core"]["OTP_DEMO_DISCLOSURE"] == "enabled" and blocks["mahasetu-core"]["CORE_ENVIRONMENT"] != "production"
+    assert blocks["scholarship-portal"]["COOKIE_SECURE"] == "true" and blocks["mahasetu-dashboard"]["COOKIE_SECURE"] == "true"
+    print("PASS: hosted settings give each service only its own secrets, one distinct database login each, and https return address")
+
+
 def payload(name):
     schema = read(CORE/(name+".schema.json"))
     return {k: v for k, v in schema.items() if k not in ("title", "$schema")}
@@ -214,3 +251,4 @@ if __name__ == "__main__":
     validate_soap()
     validate_contracts()
     validate_core_flow()
+    validate_hosted_settings()

@@ -100,8 +100,32 @@ def connect(args, values):
                            dbname=args.database, password=password, autocommit=True, connect_timeout=5)
 
 
-def apply(args):
+def migrate_and_seed(conn, migration_url, schemas):
+    """Run each owner's Alembic chain and seed file for the given schemas. Works on any PostgreSQL reachable by conn."""
+    for schema in schemas:
+        repo = OWNERS[schema]
+        env = dict(os.environ, MIGRATION_DATABASE_URL=migration_url)
+        subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"], cwd=ROOT / repo, env=env, check=True,
+                       stdout=subprocess.DEVNULL)
+        conn.execute((ROOT / repo / "db/seed.sql").read_text(encoding="utf-8"))
+        revision = conn.execute(f"SELECT version_num FROM {schema}.alembic_version").fetchone()[0]
+        print(f"{schema:12} migrated to {revision} and seeded")
+
+
+def create_logins(conn, schemas, values):
+    """One login per schema that inherits only that schema's NOLOGIN runtime role."""
     from psycopg import sql
+    for schema in schemas:
+        login = LOGINS[schema]
+        password = values[schema.upper() + "_LOGIN_PASSWORD"]
+        exists = conn.execute("SELECT 1 FROM pg_roles WHERE rolname=%s", (login,)).fetchone()
+        statement = "ALTER ROLE {} LOGIN PASSWORD {}" if exists else "CREATE ROLE {} LOGIN PASSWORD {}"
+        conn.execute(sql.SQL(statement).format(sql.Identifier(login), sql.Literal(password)))
+        conn.execute(sql.SQL("GRANT {} TO {}").format(sql.Identifier(schema + "_runtime"), sql.Identifier(login)))
+    print("Created or refreshed " + str(len(schemas)) + " scoped logins. Each inherits only its own runtime role.")
+
+
+def apply(args):
     path = Path(args.env_file)
     if not path.is_file():
         sys.exit("Run `init` first: " + str(path))
@@ -115,20 +139,8 @@ def apply(args):
         migration_url = "postgresql+psycopg://{}:{}@{}:{}/{}".format(
             quote(args.user, safe=""), quote(os.environ.get("LOCAL_DB_PASSWORD") or values["LOCAL_DB_PASSWORD"], safe=""),
             args.host, int(args.port or values["LOCAL_DB_PORT"]), args.database)
-        for schema, repo in OWNERS.items():
-            env = dict(os.environ, MIGRATION_DATABASE_URL=migration_url)
-            subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"], cwd=ROOT / repo, env=env, check=True,
-                           stdout=subprocess.DEVNULL)
-            conn.execute((ROOT / repo / "db/seed.sql").read_text(encoding="utf-8"))
-            revision = conn.execute(f"SELECT version_num FROM {schema}.alembic_version").fetchone()[0]
-            print(f"{schema:12} migrated to {revision} and seeded")
-        for schema, login in LOGINS.items():
-            password = values[schema.upper() + "_LOGIN_PASSWORD"]
-            exists = conn.execute("SELECT 1 FROM pg_roles WHERE rolname=%s", (login,)).fetchone()
-            statement = "ALTER ROLE {} LOGIN PASSWORD {}" if exists else "CREATE ROLE {} LOGIN PASSWORD {}"
-            conn.execute(sql.SQL(statement).format(sql.Identifier(login), sql.Literal(password)))
-            conn.execute(sql.SQL("GRANT {} TO {}").format(sql.Identifier(schema + "_runtime"), sql.Identifier(login)))
-        print("Created or refreshed " + str(len(LOGINS)) + " scoped logins. Each inherits only its own runtime role.")
+        migrate_and_seed(conn, migration_url, list(OWNERS))
+        create_logins(conn, list(LOGINS), values)
 
 
 def main():
