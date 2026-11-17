@@ -1,6 +1,7 @@
 """Validate the independently published contracts without starting business APIs."""
 import json
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from jsonschema import Draft202012Validator as Validator, FormatChecker
 from lxml import etree
@@ -214,9 +215,11 @@ def validate_hosted_settings():
     values.update(PORTAL_URL="https://portal.example.test", SITE_URL="https://site.example.test",
                   CORE_URL="https://core.example.test", REVENUE_API_URL="https://rev.example.test",
                   EXAMINATION_API_URL="https://exam.example.test", UNIVERSITY_API_URL="https://uni.example.test",
-                  SCHOLARSHIP_DB_HOST="h1", SCHOLARSHIP_DB_PORT="5432", SCHOLARSHIP_DB_TENANT="ref1",
-                  MAHASETU_DB_HOST="h2", MAHASETU_DB_PORT="5432", MAHASETU_DB_TENANT="ref2",
                   SUPABASE_URL="https://ref1.supabase.co", SUPABASE_PUBLISHABLE_KEY="pk", SUPABASE_STORAGE_KEY="sk")
+    for number, schema in enumerate(hosted.SCHEMAS, 1):
+        prefix = schema.upper() + "_DB_"
+        values.update({prefix + "HOST": f"host{number}.example.test", prefix + "PORT": "5432", prefix + "NAME": "db",
+                       prefix + "TENANT": f"ref{number}" if schema in ("scholarship", "mahasetu") else ""})
     blocks = {name: hosted.service_settings(name, values) for name in hosted.REQUIRED}
     for name, needed in hosted.REQUIRED.items():
         assert all(blocks[name].get(key) for key in needed), name
@@ -230,15 +233,22 @@ def validate_hosted_settings():
     for key, value in secret.items():
         holders = {name for name, block in blocks.items() if value in block.values()}
         assert holders == owners[key], (key, holders)
-    # Database logins are never shared between services or projects.
+    # Five services hold a database each, on five different servers, with five different logins.
     urls = {name: block["DATABASE_URL"] for name, block in blocks.items() if "DATABASE_URL" in block}
-    assert len(set(urls.values())) == len(urls) == 5
+    assert set(urls) == {"scholarship-portal", "mahasetu-core", "revenue-api", "examination-api", "university-api"}
+    assert len({urlsplit(url).hostname for url in urls.values()}) == 5
+    assert len({urlsplit(url).username for url in urls.values()}) == 5
     assert urls["scholarship-portal"].startswith("postgresql://scholarship_app.ref1:") and "sslmode=no-verify" in urls["scholarship-portal"]
     assert urls["mahasetu-core"].startswith("postgresql+psycopg://mahasetu_app.ref2:") and "sslmode=require" in urls["mahasetu-core"]
+    assert urls["revenue-api"].startswith("postgresql+psycopg://revenue_app:")  # a plain PostgreSQL login has no project suffix
+    # A service's address book never lists another service's database host.
+    for name, url in urls.items():
+        others = [urlsplit(u).hostname for n, u in urls.items() if n != name]
+        assert not any(host in " ".join(map(str, blocks[name].values())) for host in others), name
     assert blocks["mahasetu-core"]["RETURN_URL_DEMO_PMS"] == "https://portal.example.test/verification/return"
     assert blocks["mahasetu-core"]["OTP_DEMO_DISCLOSURE"] == "enabled" and blocks["mahasetu-core"]["CORE_ENVIRONMENT"] != "production"
     assert blocks["scholarship-portal"]["COOKIE_SECURE"] == "true" and blocks["mahasetu-dashboard"]["COOKIE_SECURE"] == "true"
-    print("PASS: hosted settings give each service only its own secrets, one distinct database login each, and https return address")
+    print("PASS: hosted settings give each service only its own secrets, its own database on its own server with its own login, and an https return address")
 
 
 def payload(name):

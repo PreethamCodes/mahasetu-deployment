@@ -32,9 +32,9 @@ python scripts/demo.py down      # add --wipe to discard the database and sign-i
 
 Then open http://localhost:3000. `docs/DEMO_SCRIPT.md` walks through the five demonstration students. To rehearse them automatically, install a Playwright browser (or set `BROWSER_CHANNEL=msedge`) and run `python -m pytest tests/test_demo.py` while the stack is up. `local-identity` is reachable only from the Scholarship portal's container and has no published port. To use a hosted Supabase project instead, replace the three `SCHOLARSHIP_SUPABASE_URL`, `SCHOLARSHIP_PUBLISHABLE_KEY` and `SCHOLARSHIP_STORAGE_KEY` values in `.env.local-db` and start the other services without `local-identity`.
 
-## Hosted demonstration (Supabase and a container host)
+## Hosted demonstration (five databases, six services)
 
-`scripts/hosted.py` prepares a hosted run: `init` writes the Git-ignored `.env.hosted` with generated synthetic secrets, `apply` migrates and seeds the two Supabase projects and creates one limited login per schema, `settings <service>` prints the environment variables to enter for one hosted service, and `check` wakes sleeping services and waits for every health address. The full procedure, limits and risks are in `docs/HOSTED_DEPLOYMENT.md`.
+`scripts/hosted.py` prepares a hosted run in which every government service has its own database on its own server (two Supabase projects, three Neon projects): `init` writes the Git-ignored `.env.hosted` with generated synthetic secrets, `apply` migrates and seeds each of the five databases and creates its limited login, `settings <service>` prints the environment variables to enter for one hosted service, and `check` wakes sleeping services and waits for every health address. The full procedure, limits and risks are in `docs/HOSTED_DEPLOYMENT.md`.
 
 ## Local database
 
