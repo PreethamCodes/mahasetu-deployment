@@ -3,7 +3,8 @@
   "services": {
     "local-db": {
       "profiles": [
-        "local-db"
+        "local-db",
+        "demo"
       ],
       "image": "postgres:16-alpine",
       "environment": {
@@ -30,7 +31,8 @@
     "scholarship-web": {
       "profiles": [
         "foundation",
-        "scholarship"
+        "scholarship",
+        "demo"
       ],
       "build": {
         "context": "../scholarship-portal"
@@ -169,7 +171,8 @@
     "dashboard-web": {
       "profiles": [
         "foundation",
-        "core"
+        "core",
+        "demo"
       ],
       "build": {
         "context": "../mahasetu-dashboard"
@@ -199,7 +202,8 @@
     "core-api": {
       "profiles": [
         "foundation",
-        "core"
+        "core",
+        "demo"
       ],
       "build": {
         "context": "../mahasetu-core"
@@ -240,7 +244,8 @@
       "profiles": [
         "foundation",
         "departments",
-        "portals"
+        "portals",
+        "demo"
       ],
       "build": {
         "context": "../revenue-service",
@@ -271,7 +276,8 @@
       "profiles": [
         "foundation",
         "departments",
-        "portals"
+        "portals",
+        "demo"
       ],
       "build": {
         "context": "../examination-service",
@@ -301,7 +307,8 @@
       "profiles": [
         "foundation",
         "departments",
-        "portals"
+        "portals",
+        "demo"
       ],
       "build": {
         "context": "../university-service",
@@ -329,9 +336,38 @@
         "timeout": "3s",
         "retries": 3
       }
+    },
+    "local-identity": {
+      "profiles": [
+        "local-identity",
+        "demo"
+      ],
+      "build": {
+        "context": "../scholarship-portal/tools/local-identity"
+      },
+      "environment": {
+        "PORT": "9999",
+        "LOCAL_IDENTITY_PUBLISHABLE_KEY": "${SCHOLARSHIP_PUBLISHABLE_KEY:-}",
+        "LOCAL_IDENTITY_STORAGE_KEY": "${SCHOLARSHIP_STORAGE_KEY:-}"
+      },
+      "volumes": [
+        "local-identity-data:/data"
+      ],
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9999/health', timeout=2)"
+        ],
+        "interval": "10s",
+        "timeout": "3s",
+        "retries": 5
+      }
     }
   },
   "volumes": {
-    "local-db-data": {}
+    "local-db-data": {},
+    "local-identity-data": {}
   }
 }

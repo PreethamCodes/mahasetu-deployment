@@ -179,13 +179,18 @@ def validate_core_flow():
 def validate_layout():
     deploy = ROOT/"mahasetu-deployment"
     services = read(deploy/"compose.yaml")["services"]
-    assert len(services) == 10
+    assert len(services) == 11
     database = services["local-db"]
-    assert database["image"].startswith("postgres:") and database["profiles"] == ["local-db"]
+    assert database["image"].startswith("postgres:") and set(database["profiles"]) == {"local-db", "demo"}
     assert all(port.startswith("127.0.0.1:") for port in database["ports"]) and "healthcheck" in database
+    # The laptop-only sign-in stand-in is built from the Scholarship project and is never published to the host.
+    identity = services["local-identity"]
+    assert (deploy/identity["build"]["context"]).resolve() == (ROOT/"scholarship-portal/tools/local-identity").resolve()
+    assert "ports" not in identity and "healthcheck" in identity and "demo" in identity["profiles"]
+    assert identity["environment"]["LOCAL_IDENTITY_PUBLISHABLE_KEY"].startswith("${SCHOLARSHIP_PUBLISHABLE_KEY")
     targets = set()
     for name, service in services.items():
-        if name == "local-db":
+        if name in ("local-db", "local-identity"):
             continue
         context = (deploy/service["build"]["context"]).resolve()
         owner = context.parent if context.name == "frontend" else context
@@ -196,7 +201,7 @@ def validate_layout():
     for repo in targets | {deploy}:
         for filename in ("README.md", ".env.example", ".gitignore", "AGENTS.md"):
             assert (repo/filename).is_file()
-    print("PASS: seven repository foundations, nine independent container definitions and the local database service")
+    print("PASS: seven repository foundations, nine independent container definitions, the local database and the laptop-only sign-in service")
 
 
 def payload(name):
