@@ -1,15 +1,47 @@
 {
   "name": "mahasetu",
   "services": {
+    "local-db": {
+      "profiles": [
+        "local-db"
+      ],
+      "image": "postgres:16-alpine",
+      "environment": {
+        "POSTGRES_USER": "postgres",
+        "POSTGRES_PASSWORD": "${LOCAL_DB_PASSWORD:-}",
+        "POSTGRES_DB": "mahasetu"
+      },
+      "ports": [
+        "127.0.0.1:${LOCAL_DB_PORT:-5433}:5432"
+      ],
+      "volumes": [
+        "local-db-data:/var/lib/postgresql/data"
+      ],
+      "healthcheck": {
+        "test": [
+          "CMD-SHELL",
+          "pg_isready -U postgres -d mahasetu"
+        ],
+        "interval": "5s",
+        "timeout": "3s",
+        "retries": 10
+      }
+    },
     "scholarship-web": {
       "profiles": [
-        "foundation"
+        "foundation",
+        "scholarship"
       ],
       "build": {
         "context": "../scholarship-portal"
       },
       "environment": {
-        "PORT": "3000"
+        "PORT": "3000",
+        "DATABASE_URL": "${SCHOLARSHIP_DATABASE_URL:-}",
+        "SUPABASE_URL": "${SCHOLARSHIP_SUPABASE_URL:-}",
+        "SUPABASE_PUBLISHABLE_KEY": "${SCHOLARSHIP_PUBLISHABLE_KEY:-}",
+        "SCHOLARSHIP_STORAGE_KEY": "${SCHOLARSHIP_STORAGE_KEY:-}",
+        "COOKIE_SECURE": "${SCHOLARSHIP_COOKIE_SECURE:-true}"
       },
       "ports": [
         "127.0.0.1:${SCHOLARSHIP_WEB_PORT:-3000}:3000"
@@ -17,9 +49,9 @@
       "healthcheck": {
         "test": [
           "CMD",
-          "python",
-          "-c",
-          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3000/health.txt', timeout=2)"
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
         ],
         "interval": "15s",
         "timeout": "3s",
@@ -28,13 +60,18 @@
     },
     "revenue-web": {
       "profiles": [
-        "foundation"
+        "foundation",
+        "portals"
       ],
       "build": {
-        "context": "../revenue-service"
+        "context": "../revenue-service/frontend"
       },
       "environment": {
-        "PORT": "3001"
+        "PORT": "3001",
+        "BACKEND_URL": "${REVENUE_PORTAL_BACKEND_URL:-http://revenue-api:8001}",
+        "PORTAL_DEMO_ACCESS": "${PORTAL_DEMO_ACCESS:-disabled}",
+        "REVENUE_USER": "${REVENUE_USER:-}",
+        "REVENUE_PASSWORD": "${REVENUE_PASSWORD:-}"
       },
       "ports": [
         "127.0.0.1:${REVENUE_WEB_PORT:-3001}:3001"
@@ -42,24 +79,33 @@
       "healthcheck": {
         "test": [
           "CMD",
-          "python",
-          "-c",
-          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3001/health.txt', timeout=2)"
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
         ],
         "interval": "15s",
         "timeout": "3s",
         "retries": 3
+      },
+      "depends_on": {
+        "revenue-api": {
+          "condition": "service_healthy"
+        }
       }
     },
     "examination-web": {
       "profiles": [
-        "foundation"
+        "foundation",
+        "portals"
       ],
       "build": {
-        "context": "../examination-service"
+        "context": "../examination-service/frontend"
       },
       "environment": {
-        "PORT": "3002"
+        "PORT": "3002",
+        "BACKEND_URL": "${EXAMINATION_PORTAL_BACKEND_URL:-http://examination-api:8002}",
+        "PORTAL_DEMO_ACCESS": "${PORTAL_DEMO_ACCESS:-disabled}",
+        "EXAMINATION_API_KEY": "${EXAMINATION_API_KEY:-}"
       },
       "ports": [
         "127.0.0.1:${EXAMINATION_WEB_PORT:-3002}:3002"
@@ -67,24 +113,34 @@
       "healthcheck": {
         "test": [
           "CMD",
-          "python",
-          "-c",
-          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3002/health.txt', timeout=2)"
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3002/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
         ],
         "interval": "15s",
         "timeout": "3s",
         "retries": 3
+      },
+      "depends_on": {
+        "examination-api": {
+          "condition": "service_healthy"
+        }
       }
     },
     "university-web": {
       "profiles": [
-        "foundation"
+        "foundation",
+        "portals"
       ],
       "build": {
-        "context": "../university-service"
+        "context": "../university-service/frontend"
       },
       "environment": {
-        "PORT": "3003"
+        "PORT": "3003",
+        "BACKEND_URL": "${UNIVERSITY_PORTAL_BACKEND_URL:-http://university-api:8003}",
+        "PORTAL_DEMO_ACCESS": "${PORTAL_DEMO_ACCESS:-disabled}",
+        "UNIVERSITY_CLIENT_ID": "${UNIVERSITY_CLIENT_ID:-}",
+        "UNIVERSITY_CLIENT_SECRET": "${UNIVERSITY_CLIENT_SECRET:-}"
       },
       "ports": [
         "127.0.0.1:${UNIVERSITY_WEB_PORT:-3003}:3003"
@@ -92,13 +148,18 @@
       "healthcheck": {
         "test": [
           "CMD",
-          "python",
-          "-c",
-          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3003/health.txt', timeout=2)"
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3003/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
         ],
         "interval": "15s",
         "timeout": "3s",
         "retries": 3
+      },
+      "depends_on": {
+        "university-api": {
+          "condition": "service_healthy"
+        }
       }
     },
     "dashboard-web": {
@@ -128,13 +189,28 @@
     },
     "core-api": {
       "profiles": [
-        "foundation"
+        "foundation",
+        "core"
       ],
       "build": {
         "context": "../mahasetu-core"
       },
       "environment": {
-        "PORT": "8000"
+        "PORT": "8000",
+        "CORE_ENVIRONMENT": "${CORE_ENVIRONMENT:-development}",
+        "DATABASE_URL": "${CORE_DATABASE_URL:-}",
+        "DASHBOARD_CLIENT_TOKEN": "${DASHBOARD_CLIENT_TOKEN:-}",
+        "OTP_HASH_KEY": "${OTP_HASH_KEY:-}",
+        "REQUESTER_TOKEN_SCHOLARSHIP": "${REQUESTER_TOKEN_SCHOLARSHIP:-}",
+        "OTP_DEMO_DISCLOSURE": "${OTP_DEMO_DISCLOSURE:-disabled}",
+        "REVENUE_URL": "${REVENUE_PORTAL_BACKEND_URL:-http://revenue-api:8001}",
+        "EXAMINATION_URL": "${EXAMINATION_PORTAL_BACKEND_URL:-http://examination-api:8002}",
+        "UNIVERSITY_URL": "${UNIVERSITY_PORTAL_BACKEND_URL:-http://university-api:8003}",
+        "REVENUE_USER": "${REVENUE_USER:-}",
+        "REVENUE_PASSWORD": "${REVENUE_PASSWORD:-}",
+        "EXAMINATION_API_KEY": "${EXAMINATION_API_KEY:-}",
+        "UNIVERSITY_CLIENT_ID": "${UNIVERSITY_CLIENT_ID:-}",
+        "UNIVERSITY_CLIENT_SECRET": "${UNIVERSITY_CLIENT_SECRET:-}"
       },
       "ports": [
         "127.0.0.1:${CORE_API_PORT:-8000}:8000"
@@ -144,7 +220,7 @@
           "CMD",
           "python",
           "-c",
-          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health.txt', timeout=2)"
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"
         ],
         "interval": "15s",
         "timeout": "3s",
@@ -153,13 +229,19 @@
     },
     "revenue-api": {
       "profiles": [
-        "foundation"
+        "foundation",
+        "departments",
+        "portals"
       ],
       "build": {
-        "context": "../revenue-service"
+        "context": "../revenue-service",
+        "target": "backend"
       },
       "environment": {
-        "PORT": "8001"
+        "PORT": "8001",
+        "DATABASE_URL": "${REVENUE_DATABASE_URL:-}",
+        "REVENUE_USER": "${REVENUE_USER:-}",
+        "REVENUE_PASSWORD": "${REVENUE_PASSWORD:-}"
       },
       "ports": [
         "127.0.0.1:${REVENUE_API_PORT:-8001}:8001"
@@ -169,7 +251,7 @@
           "CMD",
           "python",
           "-c",
-          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health.txt', timeout=2)"
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=2)"
         ],
         "interval": "15s",
         "timeout": "3s",
@@ -178,13 +260,18 @@
     },
     "examination-api": {
       "profiles": [
-        "foundation"
+        "foundation",
+        "departments",
+        "portals"
       ],
       "build": {
-        "context": "../examination-service"
+        "context": "../examination-service",
+        "target": "backend"
       },
       "environment": {
-        "PORT": "8002"
+        "PORT": "8002",
+        "DATABASE_URL": "${EXAMINATION_DATABASE_URL:-}",
+        "EXAMINATION_API_KEY": "${EXAMINATION_API_KEY:-}"
       },
       "ports": [
         "127.0.0.1:${EXAMINATION_API_PORT:-8002}:8002"
@@ -194,7 +281,7 @@
           "CMD",
           "python",
           "-c",
-          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8002/health.txt', timeout=2)"
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8002/health', timeout=2)"
         ],
         "interval": "15s",
         "timeout": "3s",
@@ -203,13 +290,21 @@
     },
     "university-api": {
       "profiles": [
-        "foundation"
+        "foundation",
+        "departments",
+        "portals"
       ],
       "build": {
-        "context": "../university-service"
+        "context": "../university-service",
+        "target": "backend"
       },
       "environment": {
-        "PORT": "8003"
+        "PORT": "8003",
+        "DATABASE_URL": "${UNIVERSITY_DATABASE_URL:-}",
+        "UNIVERSITY_CLIENT_ID": "${UNIVERSITY_CLIENT_ID:-}",
+        "UNIVERSITY_CLIENT_SECRET": "${UNIVERSITY_CLIENT_SECRET:-}",
+        "UNIVERSITY_SIGNING_KEY": "${UNIVERSITY_SIGNING_KEY:-}",
+        "TOKEN_TTL_SECONDS": "${TOKEN_TTL_SECONDS:-300}"
       },
       "ports": [
         "127.0.0.1:${UNIVERSITY_API_PORT:-8003}:8003"
@@ -219,12 +314,15 @@
           "CMD",
           "python",
           "-c",
-          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8003/health.txt', timeout=2)"
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8003/health', timeout=2)"
         ],
         "interval": "15s",
         "timeout": "3s",
         "retries": 3
       }
     }
+  },
+  "volumes": {
+    "local-db-data": {}
   }
 }

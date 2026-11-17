@@ -30,7 +30,7 @@ def check_database(url, conn):
         for attempt in range(2):
             run(sys.executable, "-m", "alembic", "upgrade", "head", cwd=ROOT/repo, env=env)
             conn.execute((ROOT/repo/"db/seed.sql").read_text())
-        assert conn.execute(f"SELECT version_num FROM {schema}.alembic_version").fetchone()[0] == schema+"_0001"
+        assert conn.execute(f"SELECT version_num FROM {schema}.alembic_version").fetchone()[0] == (schema+{"scholarship": "_0003", "mahasetu": "_0002"}.get(schema, "_0001"))
         rows = conn.execute("""SELECT relname, relrowsecurity FROM pg_class
             WHERE relnamespace=%s::regnamespace AND relkind='r' AND relname <> 'alembic_version'""", (schema,)).fetchall()
         assert rows and all(enabled for _, enabled in rows)
@@ -48,11 +48,34 @@ def check_database(url, conn):
         "SELECT count(*)=0 FROM university.bonafide_certificates WHERE record_ref='ENR-5'",
         "SELECT count(*)=2 FROM storage.buckets WHERE NOT public",
         "SELECT count(*)=5 FROM mahasetu.access_policies",
+        # Verification inputs and fixture dates that must outlast the demonstration period.
+        "SELECT count(*)=5 FROM scholarship.scholarship_applications WHERE mahasetu_student_id=student_ref"
+        " AND applicant_mobile ~ '^[6-9][0-9]{9}$'",
+        "SELECT bool_and(expires_on >= DATE '2030-12-31') FROM revenue.income_certificates WHERE status='VALID'",
+        "SELECT bool_and(expires_on >= DATE '2030-12-31') FROM revenue.caste_certificates WHERE status='VALID'",
+        "SELECT bool_and(valid_until >= DATE '2030-12-31') FROM university.bonafide_certificates",
+        # Seeded, pre-approved demonstration rules and department document labels used by the applicant flow.
+        "SELECT count(*)=8 FROM mahasetu.rule_versions WHERE scheme_id='DEMO-PMS' AND approval_status='APPROVED'"
+        " AND rule_id LIKE 'DEMO-%' AND definition->>'approval_status'='APPROVED'",
+        "SELECT count(*)=5 FROM mahasetu.evidence_categories",
+        "SELECT count(*)=1 FROM mahasetu.registered_services WHERE service_id='DEMO-PMS' AND display_name <> service_id",
     ]
     for query in checks:
         assert conn.execute(query).fetchone() == (True,), query
+    check_verification_inputs(conn)
     check_review_permissions(conn)
+    check_applicant_flow_tables(conn)
     print("PASS: five private schemas, repeat migrations and seeds, isolation, RLS, storage catalog and scenarios")
+
+
+def check_verification_inputs(conn):
+    for column, value in (("applicant_mobile", "1234567890"), ("applicant_mobile", "90000"),
+                          ("mahasetu_student_id", "student-1"), ("mahasetu_student_id", "MHSTU12")):
+        try:
+            conn.execute(f"UPDATE scholarship.scholarship_applications SET {column}=%s WHERE student_ref='MHSTU0001'", (value,))
+        except psycopg.errors.CheckViolation:
+            continue
+        raise AssertionError(f"Accepted invalid {column}: {value}")
 
 
 def check_review_permissions(conn):
@@ -74,6 +97,29 @@ def check_review_permissions(conn):
     conn.execute("SET ROLE mahasetu_reviewer")
     assert conn.execute(approval).rowcount == 1
     assert conn.execute(approval).rowcount == 0
+    conn.execute("RESET ROLE")
+
+
+def check_applicant_flow_tables(conn):
+    """Core's runtime role can use the applicant-flow tables but the database still enforces the rules."""
+    conn.execute("SET ROLE mahasetu_runtime")
+    request = conn.execute("""INSERT INTO mahasetu.verification_requests (applicant_ref, application_ref, service_id, purpose,
+        requested_evidence, idempotency_key, payload_digest, state, applicant_mobile)
+        VALUES ('MHSTU0001','APP-DB-CHECK','DEMO-PMS','SCHOLARSHIP_VERIFICATION','[]','db-check','x','CREATED','9000000001')
+        RETURNING id""").fetchone()[0]
+    insert = """INSERT INTO mahasetu.message_outbox (request_id, kind, recipient_mobile, body)
+        VALUES (%s, 'VERIFICATION_RESULT', '9000000001', 'b')"""
+    conn.execute(insert, (request,))
+    for statement, params in ((insert, (request,)),  # a second result message for one transaction
+                              ("""INSERT INTO mahasetu.message_outbox (request_id, kind, recipient_mobile, body)
+                                  VALUES (%s, 'OTP', '123', 'b')""", (request,)),  # malformed recipient
+                              ("""INSERT INTO mahasetu.otp_challenges (request_id, provider_id, code_hash, status, expires_at,
+                                  resend_after) VALUES (%s, 'revenue', 'h', 'VERIFIED', now(), now())""", (request,))):
+        try:
+            conn.execute(statement, params)
+        except (psycopg.errors.UniqueViolation, psycopg.errors.CheckViolation):
+            continue
+        raise AssertionError("Applicant-flow constraint did not hold: " + statement.split("(")[0])
     conn.execute("RESET ROLE")
 
 
