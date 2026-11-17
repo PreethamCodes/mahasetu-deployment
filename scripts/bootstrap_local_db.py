@@ -73,6 +73,8 @@ def desired(values):
     keep("REQUESTER_TOKEN_SCHOLARSHIP", token)  # the Scholarship portal's server credential for Core
     keep("CORE_ENVIRONMENT", "development")
     keep("OTP_DEMO_DISCLOSURE", "enabled")  # lets the website show the one-time code; refused in production
+    keep("DASHBOARD_COOKIE_SECURE", "false")  # loopback HTTP demonstration only
+    keep("DEMO_MESSAGE_INBOX", "enabled")
     keep("PORTAL_DEMO_ACCESS", "enabled")
     keep("SCHOLARSHIP_COOKIE_SECURE", "false")  # loopback HTTP demonstration only
     return out
