@@ -30,7 +30,7 @@ def check_database(url, conn):
         for attempt in range(2):
             run(sys.executable, "-m", "alembic", "upgrade", "head", cwd=ROOT/repo, env=env)
             conn.execute((ROOT/repo/"db/seed.sql").read_text())
-        assert conn.execute(f"SELECT version_num FROM {schema}.alembic_version").fetchone()[0] == (schema+{"scholarship": "_0003", "mahasetu": "_0002"}.get(schema, "_0001"))
+        assert conn.execute(f"SELECT version_num FROM {schema}.alembic_version").fetchone()[0] == (schema+{"scholarship": "_0004", "mahasetu": "_0002"}.get(schema, "_0001"))
         rows = conn.execute("""SELECT relname, relrowsecurity FROM pg_class
             WHERE relnamespace=%s::regnamespace AND relkind='r' AND relname <> 'alembic_version'""", (schema,)).fetchall()
         assert rows and all(enabled for _, enabled in rows)
@@ -65,6 +65,7 @@ def check_database(url, conn):
     check_verification_inputs(conn)
     check_review_permissions(conn)
     check_applicant_flow_tables(conn)
+    check_verification_records(conn)
     print("PASS: five private schemas, repeat migrations and seeds, isolation, RLS, storage catalog and scenarios")
 
 
@@ -98,6 +99,22 @@ def check_review_permissions(conn):
     assert conn.execute(approval).rowcount == 1
     assert conn.execute(approval).rowcount == 0
     conn.execute("RESET ROLE")
+
+
+def check_verification_records(conn):
+    """The portal's record of MahaSetu verification attempts keeps its invariants in the database."""
+    app = "10000000-0000-4000-8000-000000000001"
+    insert = "INSERT INTO scholarship.verification_transactions (transaction_ref, application_id, mahasetu_student_id) VALUES (gen_random_uuid(), %s, 'MHSTU0001')"
+    conn.execute(insert, (app,))
+    for statement, params in ((insert, (app,)),  # a second attempt waiting for the applicant
+                              ("UPDATE scholarship.scholarship_applications SET verification_status='MAYBE' WHERE id=%s", (app,)),
+                              ("UPDATE scholarship.verification_transactions SET status='COMPLETED' WHERE application_id=%s", (app,))):  # no outcome
+        try:
+            conn.execute(statement, params)
+        except (psycopg.errors.UniqueViolation, psycopg.errors.CheckViolation):
+            continue
+        raise AssertionError("Verification record constraint did not hold: " + statement[:60])
+    conn.execute("UPDATE scholarship.scholarship_applications SET verification_status='VERIFIED' WHERE id=%s", (app,))
 
 
 def check_applicant_flow_tables(conn):
